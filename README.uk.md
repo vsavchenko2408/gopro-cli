@@ -31,7 +31,7 @@
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | Збирається і проходить тест на емуляторі | так | перевіряє CI | перевіряє CI |
-| Перевірено на справжній HERO7 Black | так (Debian 13, прошивка HD7.01.01.90.00) | ще ні | ще ні |
+| Перевірено на справжній HERO7 Black | так (Debian 13, прошивка HD7.01.01.90.00) | так (MacBook Pro 2013, Intel) | ще ні |
 
 ## Збірка
 
@@ -51,7 +51,11 @@ sudo cmake --install build        # необов'язково
 brew install cmake nlohmann-json sdl2 ffmpeg pkgconf
 cmake -S . -B build
 cmake --build build -j
+sudo cmake --install build        # необов'язково: щоб gopro і gopro-gui запускались звідусіль
 ```
+
+На Mac з Intel Homebrew більше не має готових пакетів, тож `brew install`
+збирає FFmpeg і залежності з вихідного коду. Це може тривати годину й більше.
 
 ### Windows (Visual Studio 2022 + vcpkg)
 

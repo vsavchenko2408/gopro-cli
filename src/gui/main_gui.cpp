@@ -300,7 +300,11 @@ void drawSetting(const gopro::Setting& setting, const Snapshot& snap, Worker& wo
     const std::string preview =
         current ? current->name : value ? "value " + std::to_string(*value) : "-";
 
-    ImGui::PushID(&setting);
+    // The id must be stable across frames. The snapshot is copied every frame,
+    // so the address of `setting` is not: on macOS it changes constantly, and
+    // a widget whose id changes between press and release never reacts.
+    ImGui::PushID(setting.mode.c_str());
+    ImGui::PushID(setting.id);
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(setting.name.c_str());
     ImGui::SameLine(170 * scale);
@@ -324,6 +328,7 @@ void drawSetting(const gopro::Setting& setting, const Snapshot& snap, Worker& wo
         }
         ImGui::EndCombo();
     }
+    ImGui::PopID();
     ImGui::PopID();
 }
 

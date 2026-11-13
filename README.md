@@ -32,10 +32,10 @@ they show exactly what your firmware supports.
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | Builds and passes the emulator test | yes | checked by CI | checked by CI |
-| Tested with a real HERO7 Black | yes (Debian 13, firmware HD7.01.01.90.00) | not yet | not yet |
+| Tested with a real HERO7 Black | yes (Debian 13, firmware HD7.01.01.90.00) | yes (MacBook Pro 2013, Intel) | not yet |
 
-The macOS and Windows builds are verified by GitHub Actions
-(`.github/workflows/build.yml`), not yet on real machines with a camera.
+The Windows build is verified by GitHub Actions
+(`.github/workflows/build.yml`), not yet on a real machine with a camera.
 
 Other cameras of the same generation (HERO5, HERO6, HERO 2018) use the same
 protocol and may work; none has been tested.
@@ -58,7 +58,11 @@ sudo cmake --install build        # optional: installs gopro and gopro-gui
 brew install cmake nlohmann-json sdl2 ffmpeg pkgconf
 cmake -S . -B build
 cmake --build build -j
+sudo cmake --install build        # optional: puts gopro and gopro-gui on the PATH
 ```
+
+On Intel Macs Homebrew no longer ships prebuilt packages, so `brew install`
+compiles FFmpeg and its dependencies from source. Expect it to take an hour or more.
 
 ### Windows (Visual Studio 2022 + vcpkg)
 

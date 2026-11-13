@@ -1,6 +1,6 @@
 {
   "name": "gopro-cli",
-  "version-string": "0.6.0",
+  "version-string": "0.6.1",
   "description": "Control a GoPro HERO7 Black over Wi-Fi: CLI and GUI",
   "dependencies": [
     "curl",

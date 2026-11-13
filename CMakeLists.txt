@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(gopro-cli VERSION 0.6.0 LANGUAGES CXX
+project(gopro-cli VERSION 0.6.1 LANGUAGES CXX
         DESCRIPTION "Control a GoPro HERO7 Black over Wi-Fi: CLI and GUI")
 
 set(CMAKE_CXX_STANDARD 17)
