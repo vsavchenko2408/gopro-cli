@@ -1,23 +1,41 @@
 # gopro-cli
 
-Керування GoPro HERO7 Black з Linux через Wi-Fi: запис, фото, режими, всі
-налаштування камери, перегляд і завантаження файлів з SD-карти.
+Керування GoPro HERO7 Black з Linux через Wi-Fi. У проєкті дві програми:
 
-Це перший етап проєкту: консольна утиліта `gopro` і бібліотека `libgopro.a`,
-на якій потім буде побудовано графічний інтерфейс.
+- `gopro-gui` — вікно з живим зображенням, кнопками зйомки, усіма
+  налаштуваннями камери та файлами з SD-карти;
+- `gopro` — те саме з командного рядка.
 
-> Статус: v0.4. Перевірено на справжній HERO7 Black (прошивка
-> HD7.01.01.90.00): стан, налаштування, запис, фото, режими, годинник, медіа.
-> Live preview ще не перевірено на камері.
+Обидві працюють через спільну бібліотеку `libgopro` (`src/camera.*`).
+
+> Статус: v0.5. Командний рядок перевірено на справжній HERO7 Black (прошивка
+> HD7.01.01.90.00). Графічний інтерфейс перевірено лише на емуляторі камери.
 
 ## Збірка (Debian 13)
 
 ```bash
-sudo apt install build-essential cmake libcurl4-openssl-dev nlohmann-json3-dev ffmpeg
+sudo apt install build-essential cmake libcurl4-openssl-dev nlohmann-json3-dev \
+    libsdl2-dev libgl-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev ffmpeg
 cmake -S . -B build
-cmake --build build
-sudo cmake --install build      # необов'язково: ставить gopro в /usr/local/bin
+cmake --build build -j
+sudo cmake --install build      # ставить gopro і gopro-gui в /usr/local/bin
 ```
+
+Лише командний рядок, без графіки: `cmake -S . -B build -DGOPRO_BUILD_GUI=OFF`.
+
+Після перенесення теки проєкту видали `build` і повтори `cmake -S . -B build`.
+
+## Графічний інтерфейс
+
+```bash
+gopro-gui                 # на екрані 4K: gopro-gui --scale 1.5
+```
+
+- Ліворуч живе зображення, під ним кнопка зйомки, режими та підрежими.
+- Праворуч вкладка Settings (усі налаштування, з пошуком) і Media (файли на
+  карті, Save зберігає в `~/GoPro`, Delete питає підтвердження).
+- Унизу результат останньої дії або причина, чому камера недоступна.
+- Якщо камера ще не в мережі, програма чекає і підключається сама.
 
 ## Підключення
 
@@ -80,7 +98,7 @@ gopro media get last
 Якщо `gopro info` не відповідає, спробуй `gopro pair` (перед цим почни
 підключення GoPro App у меню Connections камери).
 
-Ще не перевірено на залізі: `gopro preview`, `gopro wake`.
+Ще не перевірено на залізі: `gopro wake`.
 
 ## Тест без камери
 
@@ -95,14 +113,19 @@ export GOPRO_HOST=127.0.0.1 GOPRO_PORT=8099 GOPRO_MEDIA_PORT=8099
 ```
 src/http.*      HTTP GET і завантаження файлів (libcurl)
 src/camera.*    клас Camera: схема, стан, команди, медіа
-src/main.cpp    розбір командного рядка
+src/main.cpp    командний рядок (gopro)
+src/gui/        графічний інтерфейс (gopro-gui):
+                main_gui.cpp      вікно та елементи керування (Dear ImGui)
+                worker.*          фоновий потік для запитів до камери
+                video_stream.*    прийом і декодування відео (FFmpeg)
+third_party/    Dear ImGui (ліцензія MIT), включено у проєкт
 tools/          емулятор камери і схема HERO7 Black для тестів
 ```
 
 ## Далі за планом
 
-1. Перевірка live preview на камері.
-2. Графічний інтерфейс поверх `libgopro`.
+1. Перевірка графічного інтерфейсу на камері, затримка зображення.
+2. Приховування варіантів, які камера не дозволяє в поточному режимі.
 3. Bluetooth LE: будити камеру і вмикати її Wi-Fi без кнопок.
 
 ## Джерела
