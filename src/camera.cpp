@@ -1,9 +1,6 @@
 #include "camera.hpp"
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "platform.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -44,15 +41,22 @@ std::string urlEncode(const std::string& text) {
 }
 
 // The camera sends numbers sometimes as numbers and sometimes as strings.
-std::optional<long> toLong(const json& value) {
-    if (value.is_number_integer()) return value.get<long>();
+// 64 bits on purpose: video files pass 2 GB, and `long` is 32-bit on Windows.
+std::optional<std::int64_t> toInt64(const json& value) {
+    if (value.is_number_integer()) return value.get<std::int64_t>();
     if (value.is_boolean()) return value.get<bool>() ? 1 : 0;
     if (value.is_string()) {
         try {
-            return std::stol(value.get<std::string>());
+            return std::stoll(value.get<std::string>());
         } catch (const std::exception&) {
         }
     }
+    return std::nullopt;
+}
+
+// Status and setting values are small, so `long` is enough for them.
+std::optional<long> toLong(const json& value) {
+    if (const auto wide = toInt64(value)) return static_cast<long>(*wide);
     return std::nullopt;
 }
 
@@ -139,17 +143,9 @@ std::string Camera::raw(const std::string& pathAndQuery) const {
 // --- Camera: schema ---------------------------------------------------------
 
 std::string Camera::schemaCachePath() const {
-    fs::path base;
-    if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg) {
-        base = xdg;
-    } else if (const char* home = std::getenv("HOME"); home && *home) {
-        base = fs::path(home) / ".cache";
-    } else {
-        base = fs::temp_directory_path();
-    }
     const std::string file =
         "schema-" + endpoint_.host + "-" + std::to_string(endpoint_.port) + ".json";
-    return (base / "gopro-cli" / file).string();
+    return (fs::path(platform::cacheDirectory()) / "gopro-cli" / file).string();
 }
 
 void Camera::loadSchema(bool refresh) {
@@ -305,8 +301,7 @@ void Camera::zoom(int percent) {
 void Camera::syncTime() {
     // Six bytes, each written as %HH: year-2000, month, day, hour, minute, second.
     const std::time_t now = std::time(nullptr);
-    std::tm local{};
-    localtime_r(&now, &local);
+    const std::tm local = platform::localTime(now);
     char encoded[32];
     std::snprintf(encoded, sizeof encoded, "%%%02x%%%02x%%%02x%%%02x%%%02x%%%02x",
                   (local.tm_year + 1900) % 100, local.tm_mon + 1, local.tm_mday,
@@ -332,19 +327,9 @@ void Camera::wake(const std::string& mac) {
     std::vector<unsigned char> packet(6, 0xFF);
     for (int i = 0; i < 16; ++i) packet.insert(packet.end(), address.begin(), address.end());
 
-    sockaddr_in target{};
-    target.sin_family = AF_INET;
-    target.sin_port = htons(9);
-    if (inet_pton(AF_INET, endpoint_.host.c_str(), &target.sin_addr) != 1) {
-        throw std::invalid_argument("wake needs a numeric IPv4 host, got '" + endpoint_.host + "'");
-    }
-    const int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) throw HttpError("cannot create a UDP socket");
-    const ssize_t sent = sendto(sock, packet.data(), packet.size(), 0,
-                                reinterpret_cast<const sockaddr*>(&target), sizeof target);
-    close(sock);
-    if (sent != static_cast<ssize_t>(packet.size())) {
-        throw HttpError("cannot send the wake packet (not on the camera's Wi-Fi?)");
+    if (!platform::sendUdp(endpoint_.host, 9, packet.data(), packet.size())) {
+        throw HttpError("cannot send the wake packet to " + endpoint_.host +
+                        " (not on the camera's Wi-Fi?)");
     }
 }
 
@@ -366,17 +351,8 @@ void Camera::stopStream() {
 
 void Camera::sendStreamKeepAlive() const {
     static const char kMessage[] = "_GPHD_:0:0:2:0.000000\n";
-    sockaddr_in target{};
-    target.sin_family = AF_INET;
-    target.sin_port = htons(kStreamPort);
-    if (inet_pton(AF_INET, endpoint_.host.c_str(), &target.sin_addr) != 1) {
-        throw std::invalid_argument("preview needs a numeric IPv4 host, got '" + endpoint_.host + "'");
-    }
-    const int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) throw HttpError("cannot create a UDP socket");
-    sendto(sock, kMessage, sizeof kMessage - 1, 0, reinterpret_cast<const sockaddr*>(&target),
-           sizeof target);
-    close(sock);
+    // Best effort: one lost keep-alive is harmless, the next follows in 2.5 s.
+    platform::sendUdp(endpoint_.host, kStreamPort, kMessage, sizeof kMessage - 1);
 }
 
 // --- Camera: media ----------------------------------------------------------
@@ -390,8 +366,8 @@ std::vector<MediaFile> Camera::mediaList() const {
             MediaFile file;
             file.dir = dirName;
             file.name = entry.value("n", "");
-            file.size = static_cast<std::uint64_t>(toLong(entry.value("s", json())).value_or(0));
-            file.modified = static_cast<std::time_t>(toLong(entry.value("mod", json())).value_or(0));
+            file.size = static_cast<std::uint64_t>(toInt64(entry.value("s", json())).value_or(0));
+            file.modified = static_cast<std::time_t>(toInt64(entry.value("mod", json())).value_or(0));
             if (!file.name.empty()) files.push_back(std::move(file));
         }
     }

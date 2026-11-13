@@ -4,6 +4,7 @@
 // Threads: the UI thread draws; Worker talks to the camera; VideoStream
 // decodes the preview. The UI thread never waits for the camera.
 
+#include "platform.hpp"
 #include "video_stream.hpp"
 #include "worker.hpp"
 
@@ -91,8 +92,7 @@ std::string clockText(long seconds) {
 }
 
 std::string dateText(std::time_t when) {
-    std::tm local{};
-    localtime_r(&when, &local);
+    const std::tm local = gopro::platform::localTime(when);
     char text[32];
     std::strftime(text, sizeof text, "%Y-%m-%d %H:%M", &local);
     return text;
@@ -513,12 +513,23 @@ void applyStyle(float scale) {
     style.Colors[ImGuiCol_Header] = ImVec4(0.17f, 0.18f, 0.20f, 1.0f);
     style.ScaleAllSizes(scale);
 
-    // DejaVu Sans is on practically every Debian install; fall back to the
-    // built-in font if it is not there.
+    // Use a system font with Cyrillic glyphs (file names and folders may need
+    // them); fall back to ImGui's built-in font if none of these exist.
     ImGuiIO& io = ImGui::GetIO();
-    for (const char* path : {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                             "/usr/share/fonts/TTF/DejaVuSans.ttf"}) {
-        if (std::filesystem::exists(path)) {
+    for (const char* path : {
+#if defined(_WIN32)
+             "C:\\Windows\\Fonts\\segoeui.ttf", "C:\\Windows\\Fonts\\arial.ttf",
+#elif defined(__APPLE__)
+             "/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial.ttf",
+             "/System/Library/Fonts/Supplemental/Tahoma.ttf",
+#else
+             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf",
+             "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+#endif
+         }) {
+        std::error_code error;
+        if (std::filesystem::exists(path, error)) {
             io.Fonts->AddFontFromFileTTF(path, 16.0f * scale, nullptr,
                                          io.Fonts->GetGlyphRangesCyrillic());
             return;
@@ -578,9 +589,21 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "gopro-gui: cannot start SDL: %s\n", SDL_GetError());
         return 1;
     }
+    // Same choices as the Dear ImGui SDL2 example: macOS only offers a
+    // forward-compatible core profile; elsewhere OpenGL 3.0 is enough.
+#ifdef __APPLE__
+    const char* glslVersion = "#version 150";
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+#else
+    const char* glslVersion = "#version 130";
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_Window* window = SDL_CreateWindow(
         "GoPro", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -588,7 +611,7 @@ int main(int argc, char** argv) {
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_GLContext gl = window ? SDL_GL_CreateContext(window) : nullptr;
     if (!window || !gl) {
-        std::fprintf(stderr, "gopro-gui: cannot create an OpenGL 3.3 window: %s\n", SDL_GetError());
+        std::fprintf(stderr, "gopro-gui: cannot create an OpenGL 3 window: %s\n", SDL_GetError());
         return 1;
     }
     SDL_GL_MakeCurrent(window, gl);
@@ -599,11 +622,10 @@ int main(int argc, char** argv) {
     ImGui::GetIO().IniFilename = nullptr;  // the layout is fixed; nothing to remember
     applyStyle(options.scale);
     ImGui_ImplSDL2_InitForOpenGL(window, gl);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    ImGui_ImplOpenGL3_Init(glslVersion);
 
     Ui ui;
-    const char* home = std::getenv("HOME");
-    ui.downloadDir = (std::filesystem::path(home ? home : ".") / "GoPro").string();
+    ui.downloadDir = (std::filesystem::path(gopro::platform::homeDirectory()) / "GoPro").string();
 
     {
         // Listen for video before asking the camera to send it.

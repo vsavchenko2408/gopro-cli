@@ -1,1 +1,17 @@
+# Build output
 build/
+build-*/
+out/
+vcpkg_installed/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Downloads made while testing
+*.MP4
+*.JPG
+*.part

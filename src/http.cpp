@@ -118,7 +118,9 @@ void httpDownload(const std::string& url, const std::string& filePath,
         std::remove(partPath.c_str());
         throw;
     }
-    if (std::fclose(file.release()) != 0 || std::rename(partPath.c_str(), filePath.c_str()) != 0) {
+    const bool closed = std::fclose(file.release()) == 0;
+    std::remove(filePath.c_str());  // Windows will not rename over an existing file
+    if (!closed || std::rename(partPath.c_str(), filePath.c_str()) != 0) {
         std::remove(partPath.c_str());
         throw HttpError("cannot finish writing " + filePath);
     }

@@ -1,135 +1,163 @@
 # gopro-cli
 
-Керування GoPro HERO7 Black з Linux через Wi-Fi. У проєкті дві програми:
+Control a **GoPro HERO7 Black** from a computer over Wi-Fi: live preview,
+recording, photos, modes, every camera setting, and the files on the SD card.
+Runs on Linux, macOS and Windows. Written in C++17.
 
-- `gopro-gui` — вікно з живим зображенням, кнопками зйомки, усіма
-  налаштуваннями камери та файлами з SD-карти;
-- `gopro` — те саме з командного рядка.
+[Українською](README.uk.md)
 
-Обидві працюють через спільну бібліотеку `libgopro` (`src/camera.*`).
+![gopro-gui](docs/screenshot.png)
 
-> Статус: v0.5. Командний рядок перевірено на справжній HERO7 Black (прошивка
-> HD7.01.01.90.00). Графічний інтерфейс перевірено лише на емуляторі камери.
+*`gopro-gui` connected to the camera emulator from `tools/`, which is why the
+preview shows a test pattern.*
 
-## Збірка (Debian 13)
+GoPro's official Open GoPro API starts with the HERO9. Older cameras such as
+the HERO7 speak an undocumented HTTP protocol that the community reverse
+engineered; this project is a desktop client for it.
+
+## What is in the box
+
+| Program | What it is |
+|---|---|
+| `gopro-gui` | Window with live preview, shutter, modes, all settings, media browser |
+| `gopro` | The same from the command line, scriptable |
+| `libgopro` | Static library both are built on (`src/camera.*`) |
+
+Settings are not hard-coded. The camera publishes a schema of its own modes,
+settings and options, and both programs are generated from it at run time, so
+they show exactly what your firmware supports.
+
+## Status
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Builds and passes the emulator test | yes | checked by CI | checked by CI |
+| Tested with a real HERO7 Black | yes (Debian 13, firmware HD7.01.01.90.00) | not yet | not yet |
+
+The macOS and Windows builds are verified by GitHub Actions
+(`.github/workflows/build.yml`), not yet on real machines with a camera.
+
+Other cameras of the same generation (HERO5, HERO6, HERO 2018) use the same
+protocol and may work; none has been tested.
+
+## Build
+
+### Linux (Debian / Ubuntu)
 
 ```bash
 sudo apt install build-essential cmake libcurl4-openssl-dev nlohmann-json3-dev \
-    libsdl2-dev libgl-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev ffmpeg
+    libsdl2-dev libgl-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
 cmake -S . -B build
 cmake --build build -j
-sudo cmake --install build      # ставить gopro і gopro-gui в /usr/local/bin
+sudo cmake --install build        # optional: installs gopro and gopro-gui
 ```
 
-Лише командний рядок, без графіки: `cmake -S . -B build -DGOPRO_BUILD_GUI=OFF`.
-
-Після перенесення теки проєкту видали `build` і повтори `cmake -S . -B build`.
-
-## Графічний інтерфейс
+### macOS
 
 ```bash
-gopro-gui                 # на екрані 4K: gopro-gui --scale 1.5
+brew install cmake nlohmann-json sdl2 ffmpeg pkgconf
+cmake -S . -B build
+cmake --build build -j
 ```
 
-- Ліворуч живе зображення, під ним кнопка зйомки, режими та підрежими.
-- Праворуч вкладка Settings (усі налаштування, з пошуком) і Media (файли на
-  карті, Save зберігає в `~/GoPro`, Delete питає підтвердження).
-- Унизу результат останньої дії або причина, чому камера недоступна.
-- Якщо камера ще не в мережі, програма чекає і підключається сама.
+### Windows (Visual Studio 2022 + vcpkg)
 
-## Підключення
-
-1. Увімкни на камері бездротове з'єднання (меню Connections) і знайди там
-   назву мережі камери та пароль.
-2. Підключи ноутбук до Wi-Fi камери:
-   `nmcli device wifi connect "НАЗВА_МЕРЕЖІ" password "ПАРОЛЬ"`
-3. Перевір: `gopro info`
-
-Поки ноутбук у мережі камери, інтернету через Wi-Fi не буде (через кабель
-Ethernet інтернет лишається).
-
-## Команди
-
-```
-gopro status                      батарея, режим, місце на карті
-gopro record start | stop         запис відео
-gopro photo                       зробити фото
-gopro preview                     живе зображення з камери у вікні
-gopro mode                        список режимів і підрежимів
-gopro mode video timewarp         перемкнути режим
-gopro settings video              налаштування відео і поточні значення
-gopro get video.fps               варіанти одного налаштування
-gopro set video.resolution 1080   змінити налаштування
-gopro set video.eis on
-gopro media ls                    файли на карті
-gopro media get last -o ~/Videos  завантажити останній файл
-gopro media get all  -o ~/Videos  завантажити все (вже завантажені пропускає)
-gopro media rm GH010001.MP4       видалити файл з карти (питає підтвердження)
-gopro time                        виставити годинник камери
-gopro tag                         HiLight-мітка під час запису
-gopro -v status                   показати всі запити до камери (діагностика)
-gopro --help                      повний список
+```powershell
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+C:\vcpkg\bootstrap-vcpkg.bat
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release
 ```
 
-Назви налаштувань і варіантів утиліта не зберігає у коді. Камера сама віддає
-їх опис за адресою `/gp/gpControl`, тому `gopro settings` показує саме те, що
-вміє твоя прошивка. Опис кешується в `~/.cache/gopro-cli/`; після оновлення
-прошивки запусти будь-яку команду з `--refresh`.
+vcpkg reads `vcpkg.json` and builds the dependencies on the first configure;
+FFmpeg makes that first run slow. The programs end up in `build\Release`.
 
-## Чекліст перевірки на камері
+Command line only, without SDL2 and FFmpeg: add `-DGOPRO_BUILD_GUI=OFF`.
 
-Виконай по черзі і надішли вивід того, що не спрацювало:
+## Connect
 
-```bash
-gopro info
-gopro status
-gopro status --all
-gopro settings
-gopro set video.resolution 1080
-gopro set video.fps 60
-gopro record start      # камера має почати запис
-gopro status
-gopro record stop
+1. On the camera: swipe down, *Preferences > Connections*. Turn wireless
+   connections on. *Camera Info* shows the network name and password.
+   If the password is unknown (second-hand camera): *Reset Connections*.
+2. Join that Wi-Fi network from the computer.
+3. Run `gopro-gui`, or `gopro status`.
+
+While the computer is on the camera's network it has no internet over Wi-Fi.
+A wired connection keeps working.
+
+## gopro-gui
+
+- Left: live preview, the shutter button (Record / Stop / Take photo), modes
+  and sub-modes, HiLight tag while recording.
+- *Settings*: every setting the camera reports, with a filter box. If the
+  camera refuses a combination, the footer says so.
+- *Media*: files on the card. *Save* downloads to `~/GoPro`, *Delete* asks first.
+- The app waits for the camera and reconnects by itself.
+- On a high-DPI screen: `gopro-gui --scale 1.5`.
+
+## gopro (command line)
+
+```
+gopro status                      battery, mode, SD card
+gopro record start | stop
 gopro photo
+gopro mode                        list modes and sub-modes
+gopro mode video timewarp
+gopro settings video              settings and current values
+gopro get video.fps               options of one setting
+gopro set video.resolution 1080
 gopro media ls
-gopro media get last
+gopro media get last -o ~/Videos
+gopro media get all  -o ~/Videos  skips files already downloaded
+gopro media rm GH010001.MP4       asks before deleting
+gopro preview                     live picture through ffplay
+gopro time                        set the camera clock
+gopro -v status                   show every request and the camera's answer
+gopro --help
 ```
 
-Якщо `gopro info` не відповідає, спробуй `gopro pair` (перед цим почни
-підключення GoPro App у меню Connections камери).
+## Test without a camera
 
-Ще не перевірено на залізі: `gopro wake`.
-
-## Тест без камери
+`tools/mock_camera.py` imitates the camera's HTTP API using a schema captured
+from a real HERO7 Black.
 
 ```bash
-python3 tools/mock_camera.py &
+ctest --test-dir build --output-on-failure     # runs tests/smoke_test.py
+
+python3 tools/mock_camera.py &                 # or try things by hand
 export GOPRO_HOST=127.0.0.1 GOPRO_PORT=8099 GOPRO_MEDIA_PORT=8099
 ./build/gopro status
 ```
 
-## Структура
+## Layout
 
 ```
-src/http.*      HTTP GET і завантаження файлів (libcurl)
-src/camera.*    клас Camera: схема, стан, команди, медіа
-src/main.cpp    командний рядок (gopro)
-src/gui/        графічний інтерфейс (gopro-gui):
-                main_gui.cpp      вікно та елементи керування (Dear ImGui)
-                worker.*          фоновий потік для запитів до камери
-                video_stream.*    прийом і декодування відео (FFmpeg)
-third_party/    Dear ImGui (ліцензія MIT), включено у проєкт
-tools/          емулятор камери і схема HERO7 Black для тестів
+src/platform.*      the only OS-specific code (sockets, folders, time)
+src/http.*          HTTP GET and downloads (libcurl)
+src/camera.*        class Camera: schema, state, commands, media, preview
+src/main.cpp        gopro (command line)
+src/gui/            gopro-gui: main_gui.cpp (Dear ImGui), worker.* (camera
+                    thread), video_stream.* (FFmpeg decoding thread)
+tools/              camera emulator and the HERO7 Black schema
+tests/              end-to-end test of the CLI against the emulator
+docs/PROTOCOL.md    what was confirmed on the real camera
+third_party/imgui   Dear ImGui (MIT)
 ```
 
-## Далі за планом
+## Known limits
 
-1. Перевірка графічного інтерфейсу на камері, затримка зображення.
-2. Приховування варіантів, які камера не дозволяє в поточному режимі.
-3. Bluetooth LE: будити камеру і вмикати її Wi-Fi без кнопок.
+- Wi-Fi only. This camera generation has no control over USB; by cable it is
+  a file-transfer (MTP) device.
+- The preview has a noticeable delay, most of it inside the camera.
+- `gopro wake` (Wake-on-LAN) is untested.
+- Options the camera would refuse in the current mode are still listed; the
+  app reports the refusal instead of hiding them.
 
-## Джерела
+## Credits and licence
 
-Протокол задокументований спільнотою:
-[KonradIT/goprowifihack](https://github.com/KonradIT/goprowifihack) (Apache-2.0).
-Файл `tools/hero7black-schema.json` взято звідти без змін.
+MIT, see [LICENSE](LICENSE). Third-party material is listed in
+[THIRD_PARTY.md](THIRD_PARTY.md). The protocol was documented by the
+[goprowifihack](https://github.com/KonradIT/goprowifihack) community.
+
+This project is not affiliated with or endorsed by GoPro, Inc. GoPro and HERO
+are trademarks of GoPro, Inc.

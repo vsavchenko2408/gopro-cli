@@ -1,21 +1,26 @@
 // gopro — command-line control of a GoPro HERO7 Black (and other
-// gpControl-generation cameras) over Wi-Fi.
+// gpControl-generation cameras) over Wi-Fi. Runs on Linux, macOS and Windows.
 
 #include "camera.hpp"
-
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include "platform.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
+
+#ifndef GOPRO_VERSION
+#  define GOPRO_VERSION "dev"
+#endif
 
 namespace {
 
@@ -39,7 +44,7 @@ constexpr int kMode = 43;
 constexpr int kSubMode = 44;
 constexpr int kRemainingSpaceKb = 54;
 
-const char* const kUsage = R"(gopro — control a GoPro over Wi-Fi
+const char* const kUsage = R"(gopro - control a GoPro over Wi-Fi
 
 Usage: gopro [options] <command> [arguments]
 
@@ -80,6 +85,7 @@ Options
   --media-port <n>     media port (default 8080, or $GOPRO_MEDIA_PORT)
   --refresh            re-read the settings schema from the camera
   -v, --verbose        print every request sent to the camera and its answer
+  --version            print the version
   -h, --help           this text
 )";
 
@@ -282,7 +288,7 @@ bool waitFor(const Camera& camera, int timeoutMs, Predicate done) {
     for (int waited = 0;; waited += 250) {
         if (done(camera.state())) return true;
         if (waited >= timeoutMs) return false;
-        usleep(250 * 1000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
 }
 
@@ -344,7 +350,7 @@ void cmdPhoto(Camera& camera) {
     std::cout << "Photo taken\n";
 }
 
-volatile sig_atomic_t interrupted = 0;
+volatile std::sig_atomic_t interrupted = 0;
 
 void cmdPreview(Camera& camera, std::vector<std::string>& args) {
     // The player listens on UDP 8554. It must read enough of the stream to see
@@ -353,46 +359,46 @@ void cmdPreview(Camera& camera, std::vector<std::string>& args) {
     // framing a shot and syncing to it adds delay.
     std::string player = "ffplay -loglevel error -fflags nobuffer -flags low_delay -framedrop "
                          "-an -probesize 400000 -analyzeduration 2000000 -f mpegts "
-                         "-window_title 'GoPro preview'";
+                         "-window_title \"GoPro preview\"";
     if (const auto it = std::find(args.begin(), args.end(), "--player"); it != args.end()) {
         if (it + 1 == args.end()) throw UsageError("--player needs a command");
         player = *(it + 1);
     }
     const std::string commandLine =
-        "exec " + player + " udp://0.0.0.0:" + std::to_string(Camera::kStreamPort);
+        player + " udp://0.0.0.0:" + std::to_string(Camera::kStreamPort);
 
     camera.startStream();
     camera.sendStreamKeepAlive();
 
-    const pid_t child = fork();
-    if (child < 0) throw std::runtime_error("cannot start the video player");
-    if (child == 0) {
-        execl("/bin/sh", "sh", "-c", commandLine.c_str(), static_cast<char*>(nullptr));
-        _exit(127);
-    }
+    // The player runs through the system shell on its own thread while this
+    // thread keeps the stream alive. Ctrl+C reaches the player as well, so
+    // the loop ends when the player does.
+    std::atomic<bool> playerDone{false};
+    int playerStatus = 0;
+    const auto started = std::chrono::steady_clock::now();
+    std::thread playerThread([&] {
+        playerStatus = std::system(commandLine.c_str());
+        playerDone = true;
+    });
 
     std::cout << "Preview running. Close the player window or press Ctrl+C to stop.\n";
-    signal(SIGINT, [](int) { interrupted = 1; });
-    int playerStatus = 0;
-    for (int tick = 0;; ++tick) {
-        if (interrupted) {
-            kill(child, SIGTERM);
-            waitpid(child, &playerStatus, 0);
-            break;
-        }
-        if (waitpid(child, &playerStatus, WNOHANG) == child) break;
+    std::signal(SIGINT, [](int) { interrupted = 1; });
+    for (int tick = 0; !playerDone; ++tick) {
         if (tick % 25 == 0) camera.sendStreamKeepAlive();  // every 2.5 s
-        usleep(100 * 1000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    signal(SIGINT, SIG_DFL);
+    playerThread.join();
+    std::signal(SIGINT, SIG_DFL);
 
     try {
         camera.stopStream();
     } catch (const gopro::HttpError&) {
         // The camera stops by itself once keep-alives end; nothing to recover.
     }
-    if (WIFEXITED(playerStatus) && WEXITSTATUS(playerStatus) == 127) {
-        throw std::runtime_error("the video player could not be started; ffplay comes with: sudo apt install ffmpeg");
+    const auto ran = std::chrono::steady_clock::now() - started;
+    if (playerStatus != 0 && !interrupted && ran < std::chrono::seconds(2)) {
+        throw std::runtime_error("the video player could not be started; "
+                                 "ffplay is part of FFmpeg (https://ffmpeg.org)");
     }
 }
 
@@ -413,7 +419,7 @@ void cmdGet(Camera& camera, std::vector<std::string>& args) {
     const Setting& setting = camera.setting(take(args, "setting name"));
     const State state = camera.state();
     const auto current = state.settingValue(setting.id);
-    std::cout << setting.key() << " — " << setting.name << " (id " << setting.id << ")\n";
+    std::cout << setting.key() << " - " << setting.name << " (id " << setting.id << ")\n";
     for (const gopro::Option& option : setting.options) {
         std::cout << (current && *current == option.value ? "  * " : "    ") << option.name << "\n";
     }
@@ -452,8 +458,7 @@ void cmdSet(Camera& camera, std::vector<std::string>& args) {
 }
 
 std::string formatTime(std::time_t when) {
-    std::tm local{};
-    localtime_r(&when, &local);
+    const std::tm local = gopro::platform::localTime(when);
     char text[32];
     std::strftime(text, sizeof text, "%Y-%m-%d %H:%M", &local);
     return text;
@@ -475,7 +480,7 @@ void downloadOne(const Camera& camera, const MediaFile& file, const std::string&
         std::cout << file.name << ": already downloaded\n";
         return;
     }
-    const bool interactive = isatty(STDERR_FILENO) != 0;
+    const bool interactive = gopro::platform::stderrIsTerminal();
     int lastPercent = -1;
     camera.download(file, target.string(), [&](std::uint64_t now, std::uint64_t total) {
         if (!interactive || total == 0) return;
@@ -569,6 +574,9 @@ int run(std::vector<std::string> args) {
         const bool hasValue = i + 1 < args.size();
         if (arg == "-h" || arg == "--help") {
             std::cout << kUsage;
+            return 0;
+        } else if (arg == "--version") {
+            std::cout << "gopro " << GOPRO_VERSION << "\n";
             return 0;
         } else if (arg == "-v" || arg == "--verbose") {
             gopro::setHttpTrace(true);
